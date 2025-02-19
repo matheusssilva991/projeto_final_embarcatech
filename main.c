@@ -4,6 +4,7 @@
 #include "hardware/pio.h"
 #include "hardware/timer.h"
 #include "hardware/clocks.h"
+#include "hardware/adc.h"
 
 #include "lib/ssd1306.h"
 #include "lib/font.h"
@@ -19,6 +20,10 @@
 #define RED_LED_PIN 13
 #define BTN_A_PIN 5
 #define BTN_B_PIN 6
+#define VRX_PIN 27
+#define VRY_PIN 26
+#define SW_PIN 22
+#define ADC_MAX_VALUE 4096
 
 void init_led(uint8_t led_pin);
 void init_btn(uint8_t btn_pin);
@@ -26,7 +31,7 @@ void init_leds();
 void init_btns();
 void init_i2c();
 void init_display(ssd1306_t *ssd);
-
+void init_joystick();
 
 int main()
 {
@@ -40,7 +45,8 @@ int main()
     init_display(&ssd);
     init_i2c();
     ws2812b_init(LED_MATRIX_PIN); // Inicializa a matriz de LEDs
-
+    adc_init();
+    init_joystick();
 
     while (true) {
         printf("Hello, world!\n");
@@ -93,4 +99,13 @@ void init_display(ssd1306_t *ssd) {
     // Limpa o display. O display inicia com todos os pixels apagados.
     ssd1306_fill(ssd, false);
     ssd1306_send_data(ssd);
+}
+
+// Inicializa o joystick
+void init_joystick()
+{
+    adc_gpio_init(VRX_PIN);
+    adc_gpio_init(VRY_PIN);
+
+    init_btn(SW_PIN);
 }
