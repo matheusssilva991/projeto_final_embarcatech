@@ -168,9 +168,7 @@ void ssd1306_draw_char(ssd1306_t *ssd, char c, uint8_t x, uint8_t y)
       index = 64 * 8;             // Índice 64
   } else if (c == ':') {          // Caractere ':'
       index = 65 * 8;             // Índice 65
-  } else {
-      index = 0; // Caractere desconhecido (espaço ou padrão)
-  }
+  } 
 
   for (uint8_t i = 0; i < 8; ++i)
   {

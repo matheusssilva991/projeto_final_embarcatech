@@ -24,7 +24,7 @@
 #define VRY_PIN 26
 #define SW_PIN 22
 #define ADC_MAX_VALUE 4096
-#define MAX_TEMP 60
+#define MAX_TEMP 62
 
 void init_led(uint8_t led_pin);
 void init_btn(uint8_t btn_pin);
@@ -44,6 +44,8 @@ int main()
     uint16_t vry_value_raw;
     float temperature; // Valor de X após processamento
     float humidity; // Valor de Y após processamento
+    char temperature_text[20];
+    char humidity_text[20];
 
     stdio_init_all();
 
@@ -63,11 +65,16 @@ int main()
         printf("VRX: %u, VRY: %u\n", vrx_value_raw, vry_value_raw);
         printf("TEMPERATURA: %1.f°, HUMIDADE: %1.f%%\n", temperature, humidity);
 
+        // Formata a string e armazena em temperature_text
+        snprintf(temperature_text, sizeof(temperature_text), "TEMP:%3.0f°", temperature);
+
+        // Formata a string e armazena em humidity_text
+        snprintf(humidity_text, sizeof(humidity_text), "HUM:%3.0f%%", humidity);
+
         ssd1306_draw_string(&ssd, "Quarto 1", 30, 4);
-        ssd1306_draw_char(&ssd, 0xB0, 30, 30);
-        ssd1306_draw_char(&ssd, '%', 36, 30);
-        ssd1306_draw_char(&ssd, ':', 44, 30);
-        ssd1306_draw_string(&ssd, "CAM: OFF", 30, 55);
+        ssd1306_draw_string(&ssd, temperature_text, 30, 26);
+        ssd1306_draw_string(&ssd, humidity_text, 30, 37);
+        ssd1306_draw_string(&ssd, "CAM:OFF", 30, 55);
         ssd1306_send_data(&ssd); // Atualiza o display
 
         sleep_ms(500);
