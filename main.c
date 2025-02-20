@@ -45,7 +45,7 @@ void init_display(ssd1306_t *ssd);
 void init_joystick();
 void read_joystick_xy_values(uint16_t *x_value, uint16_t *y_value);
 void process_joystick_xy_values(uint16_t x_value_raw, uint16_t y_value_raw, float *x_value, float *y_value);
-void blink_temperature(float temperature);
+void draw_temperature_level(float temperature);
 void gpio_irq_handler(uint gpio, uint32_t events);
 
 room_t rooms[NUM_ROOM];
@@ -88,7 +88,7 @@ int main()
         read_joystick_xy_values(&vrx_value_raw, &vry_value_raw);
         process_joystick_xy_values(vrx_value_raw, vry_value_raw, &rooms[room_id].humidity,
                                    &rooms[room_id].temperature);
-                                   
+
         rooms[room_id].cam_on = rooms[room_id].temperature > 37 ? true : false;
 
         // Formata a string e armazena em temperature_text
@@ -119,7 +119,7 @@ int main()
         ssd1306_send_data(&ssd); // Atualiza o display
 
         // Mostra o nivel da temperatura na matriz de LED
-        blink_temperature(rooms[room_id].temperature);
+        draw_temperature_level(rooms[room_id].temperature);
 
         // Imprime os valores lidos na comunicação serial.
         printf("VRX: %u, VRY: %u\n", vrx_value_raw, vry_value_raw);
@@ -209,7 +209,7 @@ void process_joystick_xy_values(uint16_t x_value_raw, uint16_t y_value_raw, floa
     *y_value = MAX_TEMP * (float)y_value_raw / ADC_MAX_VALUE;
 }
 
-void blink_temperature(float temperature)
+void draw_temperature_level(float temperature)
 {
     ws2812b_clear();
 
