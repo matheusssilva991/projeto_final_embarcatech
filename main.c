@@ -63,7 +63,7 @@ int main()
     uint16_t vry_value_raw;
     char temperature_text[20];
     char humidity_text[20];
-    char cam_text[10];
+    char cam_text[20];
 
     stdio_init_all();
 
@@ -81,17 +81,15 @@ int main()
 
     gpio_set_irq_enabled_with_callback(BTN_A_PIN, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
     gpio_set_irq_enabled(BTN_B_PIN, GPIO_IRQ_EDGE_FALL, true);
+    gpio_set_irq_enabled(SW_PIN, GPIO_IRQ_EDGE_FALL, true);
 
     while (true)
     {
         read_joystick_xy_values(&vrx_value_raw, &vry_value_raw);
         process_joystick_xy_values(vrx_value_raw, vry_value_raw, &rooms[room_id].humidity,
                                    &rooms[room_id].temperature);
+                                   
         rooms[room_id].cam_on = rooms[room_id].temperature > 37 ? true : false;
-
-        // Imprime os valores lidos na comunicação serial.
-        printf("VRX: %u, VRY: %u\n", vrx_value_raw, vry_value_raw);
-        printf("TEMPERATURA: %1.f°, HUMIDADE: %1.f%%\n", rooms[room_id].temperature, rooms[room_id].humidity);
 
         // Formata a string e armazena em temperature_text
         snprintf(temperature_text, sizeof(temperature_text), "Temp:%3.0f°", rooms[room_id].temperature);
@@ -112,6 +110,7 @@ int main()
             snprintf(cam_text, sizeof(cam_text), "Cam:Off");
         }
 
+        // Desenha as informações no display SSD1306
         ssd1306_fill(&ssd, false);
         ssd1306_draw_string(&ssd, rooms[room_id].name, 30, 4);
         ssd1306_draw_string(&ssd, temperature_text, 30, 26);
@@ -119,7 +118,12 @@ int main()
         ssd1306_draw_string(&ssd, cam_text, 30, 55);
         ssd1306_send_data(&ssd); // Atualiza o display
 
+        // Mostra o nivel da temperatura na matriz de LED
         blink_temperature(rooms[room_id].temperature);
+
+        // Imprime os valores lidos na comunicação serial.
+        printf("VRX: %u, VRY: %u\n", vrx_value_raw, vry_value_raw);
+        printf("TEMPERATURA: %1.f°, HUMIDADE: %1.f%%\n", rooms[room_id].temperature, rooms[room_id].humidity);
 
         sleep_ms(500);
     }
