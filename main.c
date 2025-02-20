@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 #include "pico/stdlib.h"
 #include "hardware/i2c.h"
 #include "hardware/pio.h"
@@ -25,6 +26,15 @@
 #define SW_PIN 22
 #define ADC_MAX_VALUE 4096
 #define MAX_TEMP 62
+#define NUM_ROOM 3
+
+typedef struct room
+{
+    char name[10];
+    float temperature;
+    float humidity;
+    bool cam_on;
+} room_t;
 
 void init_led(uint8_t led_pin);
 void init_btn(uint8_t btn_pin);
@@ -35,6 +45,10 @@ void init_display(ssd1306_t *ssd);
 void init_joystick();
 void read_joystick_xy_values(uint16_t *x_value, uint16_t *y_value);
 void process_joystick_xy_values(uint16_t x_value_raw, uint16_t y_value_raw, float *x_value, float *y_value);
+void blink_temperature(float temperature);
+
+room_t rooms[NUM_ROOM];
+static volatile int room_id = 0;
 
 int main()
 {
@@ -42,10 +56,9 @@ int main()
     ssd1306_t ssd; // Inicializa a estrutura do display
     uint16_t vrx_value_raw;
     uint16_t vry_value_raw;
-    float temperature; // Valor de X após processamento
-    float humidity; // Valor de Y após processamento
     char temperature_text[20];
     char humidity_text[20];
+    char cam_text[10];
 
     stdio_init_all();
 
@@ -57,25 +70,45 @@ int main()
     adc_init();
     init_joystick();
 
-    while (true) {
+    strcpy(rooms[0].name, "Sala");
+    strcpy(rooms[1].name, "Quarto");
+    strcpy(rooms[2].name, "Cozinha");
+
+    while (true)
+    {
         read_joystick_xy_values(&vrx_value_raw, &vry_value_raw);
-        process_joystick_xy_values(vrx_value_raw, vry_value_raw, &humidity, &temperature);
+        process_joystick_xy_values(vrx_value_raw, vry_value_raw, &rooms[room_id].humidity,
+                                   &rooms[room_id].temperature);
+        rooms[room_id].cam_on = rooms[room_id].temperature > 37 ? true : false;
 
         // Imprime os valores lidos na comunicação serial.
         printf("VRX: %u, VRY: %u\n", vrx_value_raw, vry_value_raw);
-        printf("TEMPERATURA: %1.f°, HUMIDADE: %1.f%%\n", temperature, humidity);
+        printf("TEMPERATURA: %1.f°, HUMIDADE: %1.f%%\n", rooms[room_id].temperature, rooms[room_id].humidity);
 
         // Formata a string e armazena em temperature_text
-        snprintf(temperature_text, sizeof(temperature_text), "TEMP:%3.0f°", temperature);
+        snprintf(temperature_text, sizeof(temperature_text), "Temp:%3.0f°", rooms[room_id].temperature);
 
         // Formata a string e armazena em humidity_text
-        snprintf(humidity_text, sizeof(humidity_text), "HUM:%3.0f%%", humidity);
+        snprintf(humidity_text, sizeof(humidity_text), "Hum:%3.0f%%", rooms[room_id].humidity);
 
-        ssd1306_draw_string(&ssd, "Quarto 1", 30, 4);
+        // Formata a string e armazena em cam_text
+        if (rooms[0].cam_on)
+        {
+            snprintf(cam_text, sizeof(cam_text), "Cam:ON");
+        }
+        else
+        {
+            snprintf(cam_text, sizeof(cam_text), "Cam:OFF");
+        }
+
+        ssd1306_fill(&ssd, false);
+        ssd1306_draw_string(&ssd, rooms[room_id].name, 30, 4);
         ssd1306_draw_string(&ssd, temperature_text, 30, 26);
         ssd1306_draw_string(&ssd, humidity_text, 30, 37);
-        ssd1306_draw_string(&ssd, "CAM:OFF", 30, 55);
+        ssd1306_draw_string(&ssd, cam_text, 30, 55);
         ssd1306_send_data(&ssd); // Atualiza o display
+
+        blink_temperature(rooms[0].temperature);
 
         sleep_ms(500);
     }
@@ -89,28 +122,32 @@ void init_led(uint8_t led_pin)
 }
 
 // Inicializa um botão em um pino específico
-void init_btn(uint8_t btn_pin) {
+void init_btn(uint8_t btn_pin)
+{
     gpio_init(btn_pin);
     gpio_set_dir(btn_pin, GPIO_IN);
     gpio_pull_up(btn_pin);
 }
 
 // Inicializa o LED RGB (11 - Azul, 12 - Verde, 13 - Vermelho)
-void init_leds() {
+void init_leds()
+{
     init_led(BLUE_LED_PIN);
     init_led(GREEN_LED_PIN);
     init_led(RED_LED_PIN);
 }
 
 // Inicializa os botões A e B (5 - A, 6 - B)
-void init_btns() {
+void init_btns()
+{
     init_btn(BTN_A_PIN);
     init_btn(BTN_B_PIN);
 }
 
 // Inicializa a comunicação I2C
-void init_i2c() {
-    i2c_init(I2C_PORT, 400*1000);
+void init_i2c()
+{
+    i2c_init(I2C_PORT, 400 * 1000);
     gpio_set_function(I2C_SDA, GPIO_FUNC_I2C);
     gpio_set_function(I2C_SCL, GPIO_FUNC_I2C);
     gpio_pull_up(I2C_SDA);
@@ -118,7 +155,8 @@ void init_i2c() {
 }
 
 // Inicializa o display OLED
-void init_display(ssd1306_t *ssd) {
+void init_display(ssd1306_t *ssd)
+{
     ssd1306_init(ssd, WIDTH, HEIGHT, false, I2C_ADDRESS, I2C_PORT);
     ssd1306_config(ssd);
     ssd1306_send_data(ssd);
@@ -152,6 +190,43 @@ void read_joystick_xy_values(uint16_t *x_value, uint16_t *y_value)
 // Processa os valores de X e Y para a posição correto no display
 void process_joystick_xy_values(uint16_t x_value_raw, uint16_t y_value_raw, float *x_value, float *y_value)
 {
-    *x_value = 100 * (float) x_value_raw / ADC_MAX_VALUE;
+    *x_value = 100 * (float)x_value_raw / ADC_MAX_VALUE;
     *y_value = MAX_TEMP * (float)y_value_raw / ADC_MAX_VALUE;
+}
+
+void blink_temperature(float temperature)
+{
+    ws2812b_clear();
+
+    /* if (temperature >= 0) {
+        for (int i=0; i < 5; i++) {
+            ws2812b_set_led(i, 0, 0, 8);
+        }
+    }
+
+    if (temperature >= 10) {
+        for (int i=5; i < 10; i++) {
+            ws2812b_set_led(i, 0, 0, 8);
+        }
+    }
+
+    if (temperature >= 18) {
+        for (int i=10; i < 15; i++) {
+            ws2812b_set_led(i, 0, 8, 0);
+        }
+    }
+
+    if (temperature >= 33) {
+        for (int i=15; i < 20; i++) {
+            ws2812b_set_led(i, 8, 0, 0);
+        }
+    }
+
+    if (temperature >= 42) {
+        for (int i=20; i < 25; i++) {
+            ws2812b_set_led(i, 8, 0, 0);
+        }
+    } */
+
+    ws2812b_write();
 }
