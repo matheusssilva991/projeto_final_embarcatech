@@ -50,8 +50,10 @@ void gpio_irq_handler(uint gpio, uint32_t events);
 
 room_t rooms[NUM_ROOM];
 static volatile int room_id = 0;
-static volatile int64_t btn_a_time = 0;
-static volatile int64_t btn_b_time = 0;
+static volatile int64_t last_valid_press_time_btn_a = 0;
+static volatile int64_t last_valid_press_time_btn_b = 0;
+static volatile int64_t last_valid_press_time_sw = 0;
+static volatile bool full_recording = false;
 
 int main()
 {
@@ -98,13 +100,16 @@ int main()
         snprintf(humidity_text, sizeof(humidity_text), "Hum:%3.0f%%", rooms[room_id].humidity);
 
         // Formata a string e armazena em cam_text
-        if (rooms[room_id].cam_on)
+        if (full_recording) {
+            snprintf(cam_text, sizeof(cam_text), "Cam: Full On");
+        }
+        else if (rooms[room_id].cam_on)
         {
-            snprintf(cam_text, sizeof(cam_text), "Cam:ON");
+            snprintf(cam_text, sizeof(cam_text), "Cam:On");
         }
         else
         {
-            snprintf(cam_text, sizeof(cam_text), "Cam:OFF");
+            snprintf(cam_text, sizeof(cam_text), "Cam:Off");
         }
 
         ssd1306_fill(&ssd, false);
@@ -240,9 +245,16 @@ void blink_temperature(float temperature)
 void gpio_irq_handler(uint gpio, uint32_t events) {
     int64_t current_time = to_ms_since_boot(get_absolute_time());
 
-    if (gpio == BTN_A_PIN && current_time - btn_a_time > 300) {
+    if (gpio == BTN_A_PIN && current_time - last_valid_press_time_btn_a > 250) {
         room_id = room_id - 1 >= 0 ? room_id - 1: 0;
-    } else if (gpio == BTN_B_PIN && current_time - btn_b_time > 300) {
+        last_valid_press_time_btn_a = to_ms_since_boot(get_absolute_time());
+
+    } else if (gpio == BTN_B_PIN && current_time - last_valid_press_time_btn_b > 250) {
         room_id = room_id + 1 <= NUM_ROOM - 1 ? room_id + 1: NUM_ROOM - 1;
+        last_valid_press_time_btn_b = to_ms_since_boot(get_absolute_time());
+
+    } else if (gpio == SW_PIN && current_time - last_valid_press_time_sw > 250) {
+        full_recording = !full_recording;
+        last_valid_press_time_sw = to_ms_since_boot(get_absolute_time());
     }
 }
