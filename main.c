@@ -46,9 +46,12 @@ void init_joystick();
 void read_joystick_xy_values(uint16_t *x_value, uint16_t *y_value);
 void process_joystick_xy_values(uint16_t x_value_raw, uint16_t y_value_raw, float *x_value, float *y_value);
 void blink_temperature(float temperature);
+void gpio_irq_handler(uint gpio, uint32_t events);
 
 room_t rooms[NUM_ROOM];
 static volatile int room_id = 0;
+static volatile int64_t btn_a_time = 0;
+static volatile int64_t btn_b_time = 0;
 
 int main()
 {
@@ -74,6 +77,9 @@ int main()
     strcpy(rooms[1].name, "Quarto");
     strcpy(rooms[2].name, "Cozinha");
 
+    gpio_set_irq_enabled_with_callback(BTN_A_PIN, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
+    gpio_set_irq_enabled(BTN_B_PIN, GPIO_IRQ_EDGE_FALL, true);
+
     while (true)
     {
         read_joystick_xy_values(&vrx_value_raw, &vry_value_raw);
@@ -92,7 +98,7 @@ int main()
         snprintf(humidity_text, sizeof(humidity_text), "Hum:%3.0f%%", rooms[room_id].humidity);
 
         // Formata a string e armazena em cam_text
-        if (rooms[0].cam_on)
+        if (rooms[room_id].cam_on)
         {
             snprintf(cam_text, sizeof(cam_text), "Cam:ON");
         }
@@ -108,7 +114,7 @@ int main()
         ssd1306_draw_string(&ssd, cam_text, 30, 55);
         ssd1306_send_data(&ssd); // Atualiza o display
 
-        blink_temperature(rooms[0].temperature);
+        blink_temperature(rooms[room_id].temperature);
 
         sleep_ms(500);
     }
@@ -229,4 +235,14 @@ void blink_temperature(float temperature)
     } */
 
     ws2812b_write();
+}
+
+void gpio_irq_handler(uint gpio, uint32_t events) {
+    int64_t current_time = to_ms_since_boot(get_absolute_time());
+
+    if (gpio == BTN_A_PIN && current_time - btn_a_time > 300) {
+        room_id = room_id - 1 >= 0 ? room_id - 1: 0;
+    } else if (gpio == BTN_B_PIN && current_time - btn_b_time > 300) {
+        room_id = room_id + 1 <= NUM_ROOM - 1 ? room_id + 1: NUM_ROOM - 1;
+    }
 }
