@@ -64,6 +64,7 @@ target_link_libraries(projeto_final_embarcatech
         hardware_timer
         hardware_clocks
         hardware_adc
+        hardware_pwm
         )
 
 pico_add_extra_outputs(projeto_final_embarcatech)

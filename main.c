@@ -6,6 +6,7 @@
 #include "hardware/timer.h"
 #include "hardware/clocks.h"
 #include "hardware/adc.h"
+#include "hardware/pwm.h"
 
 #include "lib/ssd1306.h"
 #include "lib/font.h"
@@ -21,6 +22,8 @@
 #define RED_LED_PIN 13
 #define BTN_A_PIN 5
 #define BTN_B_PIN 6
+#define BUZZER_A_PIN 21
+#define BUZZER_B_PIN 10
 #define VRX_PIN 27
 #define VRY_PIN 26
 #define SW_PIN 22
@@ -43,10 +46,14 @@ void init_btns();
 void init_i2c();
 void init_display(ssd1306_t *ssd);
 void init_joystick();
+void pwm_init_buzzer(uint pin);
+void play_tone(uint pin, uint frequency);
 void read_joystick_xy_values(uint16_t *x_value, uint16_t *y_value);
 void process_joystick_xy_values(uint16_t x_value_raw, uint16_t y_value_raw, float *x_value, float *y_value);
 void draw_temperature_level(float temperature);
 void gpio_irq_handler(uint gpio, uint32_t events);
+int64_t buzzer_a_alarm_callback(alarm_id_t id, void *user_data);
+int64_t buzzer_b_alarm_callback(alarm_id_t id, void *user_data);
 
 room_t rooms[NUM_ROOM];
 static volatile int room_id = 0;
@@ -54,6 +61,8 @@ static volatile int64_t last_valid_press_time_btn_a = 0;
 static volatile int64_t last_valid_press_time_btn_b = 0;
 static volatile int64_t last_valid_press_time_sw = 0;
 static volatile bool full_recording = false;
+static volatile bool buzzer_a_playing = false;
+static volatile bool buzzer_b_playing = false;
 
 int main()
 {
@@ -74,6 +83,8 @@ int main()
     ws2812b_init(LED_MATRIX_PIN); // Inicializa a matriz de LEDs
     adc_init();
     init_joystick();
+    pwm_init_buzzer(10);
+    pwm_init_buzzer(21);
 
     strcpy(rooms[0].name, "Sala");
     strcpy(rooms[1].name, "Quarto");
@@ -98,14 +109,14 @@ int main()
         snprintf(humidity_text, sizeof(humidity_text), "Hum:%3.0f%%", rooms[room_id].humidity);
 
         // Formata a string e armazena em cam_text
-        if (full_recording) {
+        if (full_recording) { // Ativa modo gravação total
             snprintf(cam_text, sizeof(cam_text), "Cam: Full On");
         }
-        else if (rooms[room_id].cam_on)
+        else if (rooms[room_id].cam_on) // Ativa a gravação caso a temperatura esteja alta
         {
             snprintf(cam_text, sizeof(cam_text), "Cam:On");
         }
-        else
+        else // Desliga a gravação para temperaturas amenas
         {
             snprintf(cam_text, sizeof(cam_text), "Cam:Off");
         }
@@ -120,6 +131,16 @@ int main()
 
         // Mostra o nivel da temperatura na matriz de LED
         draw_temperature_level(rooms[room_id].temperature);
+
+        if (rooms[room_id].temperature < 7 && !buzzer_a_playing) {
+            buzzer_a_playing = true;
+            play_tone(BUZZER_A_PIN, 300);
+            add_alarm_in_ms(5000, buzzer_a_alarm_callback, NULL, false);
+        } else if (rooms[room_id].temperature > 44 && !buzzer_b_playing) {
+            buzzer_b_playing = true;
+            play_tone(BUZZER_B_PIN, 415);
+            add_alarm_in_ms(5000, buzzer_b_alarm_callback, NULL, false);
+        }
 
         // Imprime os valores lidos na comunicação serial.
         printf("VRX: %u, VRY: %u\n", vrx_value_raw, vry_value_raw);
@@ -190,6 +211,26 @@ void init_joystick()
     init_btn(SW_PIN);
 }
 
+// Inicializa o PWM no pino do buzzer
+void pwm_init_buzzer(uint pin) {
+    gpio_set_function(pin, GPIO_FUNC_PWM);
+    uint slice_num = pwm_gpio_to_slice_num(pin);
+    pwm_config config = pwm_get_default_config();
+    pwm_config_set_clkdiv(&config, 4.0f); // Ajusta divisor de clock
+    pwm_init(slice_num, &config, true);
+    pwm_set_gpio_level(pin, 0); // Desliga o PWM inicialmente
+}
+
+// Toca uma nota com a frequência e duração especificadas
+void play_tone(uint pin, uint frequency) {
+    uint slice_num = pwm_gpio_to_slice_num(pin);
+    uint32_t clock_freq = clock_get_hz(clk_sys);
+    uint32_t top = clock_freq / frequency - 1;
+
+    pwm_set_wrap(slice_num, top);
+    pwm_set_gpio_level(pin, top / 2); // 50% de duty cycle
+}
+
 // Realiza a amostragem e atualiza os valores X e Y do joystick
 void read_joystick_xy_values(uint16_t *x_value, uint16_t *y_value)
 {
@@ -209,6 +250,7 @@ void process_joystick_xy_values(uint16_t x_value_raw, uint16_t y_value_raw, floa
     *y_value = MAX_TEMP * (float)y_value_raw / ADC_MAX_VALUE;
 }
 
+// Desenha o nível de temperatura na matriz de LED
 void draw_temperature_level(float temperature)
 {
     ws2812b_clear();
@@ -246,6 +288,7 @@ void draw_temperature_level(float temperature)
     ws2812b_write();
 }
 
+// Função de callback dos botões
 void gpio_irq_handler(uint gpio, uint32_t events) {
     int64_t current_time = to_ms_since_boot(get_absolute_time());
 
@@ -261,4 +304,14 @@ void gpio_irq_handler(uint gpio, uint32_t events) {
         full_recording = !full_recording;
         last_valid_press_time_sw = to_ms_since_boot(get_absolute_time());
     }
+}
+
+int64_t buzzer_a_alarm_callback(alarm_id_t id, void *user_data) {
+    buzzer_a_playing = false;
+    pwm_set_gpio_level(BUZZER_A_PIN, 0); // Desliga o som após a duração
+}
+
+int64_t buzzer_b_alarm_callback(alarm_id_t id, void *user_data) {
+    buzzer_b_playing = false;
+    pwm_set_gpio_level(BUZZER_B_PIN, 0); // Desliga o som após a duração
 }
