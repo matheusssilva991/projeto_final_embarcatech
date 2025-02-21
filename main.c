@@ -30,6 +30,8 @@
 #define ADC_MAX_VALUE 4096
 #define MAX_TEMP 62
 #define NUM_ROOM 3
+#define ALARM_DURATION 5000
+#define ALARM_DELAY 5000 // 3600000
 
 typedef struct room
 {
@@ -38,6 +40,10 @@ typedef struct room
     float humidity;
     bool cam_on;
 } room_t;
+
+typedef struct {
+    int buzzer_id;
+} buzzer_data_t;
 
 void init_led(uint8_t led_pin);
 void init_btn(uint8_t btn_pin);
@@ -51,9 +57,10 @@ void play_tone(uint pin, uint frequency);
 void read_joystick_xy_values(uint16_t *x_value, uint16_t *y_value);
 void process_joystick_xy_values(uint16_t x_value_raw, uint16_t y_value_raw, float *x_value, float *y_value);
 void draw_temperature_level(float temperature);
+void blink_humidity_level(float humidity);
 void gpio_irq_handler(uint gpio, uint32_t events);
-int64_t buzzer_a_alarm_callback(alarm_id_t id, void *user_data);
-int64_t buzzer_b_alarm_callback(alarm_id_t id, void *user_data);
+int64_t turn_off_buzzer_alarm_callback(alarm_id_t id, void *user_data);
+int64_t buzzer_reset_state_alarm_callback(alarm_id_t id, void *user_data);
 
 room_t rooms[NUM_ROOM];
 static volatile int room_id = 0;
@@ -63,6 +70,8 @@ static volatile int64_t last_valid_press_time_sw = 0;
 static volatile bool full_recording = false;
 static volatile bool buzzer_a_playing = false;
 static volatile bool buzzer_b_playing = false;
+static buzzer_data_t buzzer_a_data = {1};
+static buzzer_data_t buzzer_b_data = {2};
 
 int main()
 {
@@ -96,11 +105,33 @@ int main()
 
     while (true)
     {
-        read_joystick_xy_values(&vrx_value_raw, &vry_value_raw);
-        process_joystick_xy_values(vrx_value_raw, vry_value_raw, &rooms[room_id].humidity,
-                                   &rooms[room_id].temperature);
+        // Pega os dados de temperatura e umidade de todos os sensores
+        for (int i=0; i < NUM_ROOM; i++) {
+            read_joystick_xy_values(&vrx_value_raw, &vry_value_raw);
+            process_joystick_xy_values(vrx_value_raw, vry_value_raw, &rooms[i].humidity,
+                                       &rooms[i].temperature);
 
-        rooms[room_id].cam_on = rooms[room_id].temperature > 37 ? true : false;
+            // ativa camera em caso de temperaturas altas
+            rooms[i].cam_on = rooms[i].temperature > 37 ? true : false;
+
+            // Imprime os valores lidos na comunicação serial.
+            printf("Ambiente: %s\n", rooms[i].name);
+            printf("VRX: %u, VRY: %u\n", vrx_value_raw, vry_value_raw);
+            printf("TEMPERATURA: %1.f°, HUMIDADE: %1.f%%\n\n", rooms[i].temperature, rooms[i].humidity);
+
+            // Aciona o alarme em caso de temperaturas muito baixas
+            if (rooms[i].temperature < 7 && !buzzer_a_playing) {
+                buzzer_a_playing = true;
+                play_tone(BUZZER_A_PIN, 300);
+                add_alarm_in_ms(ALARM_DURATION, turn_off_buzzer_alarm_callback, &buzzer_a_data, false);
+
+            // Aciona o alarme em caso de temepratura
+            } else if (rooms[i].temperature > 44 && !buzzer_b_playing) {
+                buzzer_b_playing = true;
+                play_tone(BUZZER_B_PIN, 415);
+                add_alarm_in_ms(ALARM_DURATION, turn_off_buzzer_alarm_callback, &buzzer_b_data, false);
+            }
+        }
 
         // Formata a string e armazena em temperature_text
         snprintf(temperature_text, sizeof(temperature_text), "Temp:%3.0f°", rooms[room_id].temperature);
@@ -132,19 +163,8 @@ int main()
         // Mostra o nivel da temperatura na matriz de LED
         draw_temperature_level(rooms[room_id].temperature);
 
-        if (rooms[room_id].temperature < 7 && !buzzer_a_playing) {
-            buzzer_a_playing = true;
-            play_tone(BUZZER_A_PIN, 300);
-            add_alarm_in_ms(5000, buzzer_a_alarm_callback, NULL, false);
-        } else if (rooms[room_id].temperature > 44 && !buzzer_b_playing) {
-            buzzer_b_playing = true;
-            play_tone(BUZZER_B_PIN, 415);
-            add_alarm_in_ms(5000, buzzer_b_alarm_callback, NULL, false);
-        }
-
-        // Imprime os valores lidos na comunicação serial.
-        printf("VRX: %u, VRY: %u\n", vrx_value_raw, vry_value_raw);
-        printf("TEMPERATURA: %1.f°, HUMIDADE: %1.f%%\n", rooms[room_id].temperature, rooms[room_id].humidity);
+        // Blinka o nível da umidade do ar
+        blink_humidity_level(rooms[room_id].humidity);
 
         sleep_ms(500);
     }
@@ -255,7 +275,7 @@ void draw_temperature_level(float temperature)
 {
     ws2812b_clear();
 
-    /* if (temperature >= 0) {
+    if (temperature >= 0) {
         for (int i=0; i < 5; i++) {
             ws2812b_set_led(i, 0, 0, 8);
         }
@@ -283,9 +303,26 @@ void draw_temperature_level(float temperature)
         for (int i=20; i < 25; i++) {
             ws2812b_set_led(i, 8, 0, 0);
         }
-    } */
+    }
 
     ws2812b_write();
+}
+
+// Blinka o nível da umidade do ar
+void blink_humidity_level(float humidity) {
+    if (humidity >= 0 && humidity < 40) {
+        gpio_put(GREEN_LED_PIN, false);
+        gpio_put(BLUE_LED_PIN, true);
+        gpio_put(RED_LED_PIN, false);
+    } else if (humidity >= 40 && humidity < 70) {
+        gpio_put(GREEN_LED_PIN, true);
+        gpio_put(BLUE_LED_PIN, false);
+        gpio_put(RED_LED_PIN, false);
+    } else {
+        gpio_put(GREEN_LED_PIN, false);
+        gpio_put(BLUE_LED_PIN, false);
+        gpio_put(RED_LED_PIN, true);
+    }
 }
 
 // Função de callback dos botões
@@ -306,12 +343,34 @@ void gpio_irq_handler(uint gpio, uint32_t events) {
     }
 }
 
-int64_t buzzer_a_alarm_callback(alarm_id_t id, void *user_data) {
-    buzzer_a_playing = false;
-    pwm_set_gpio_level(BUZZER_A_PIN, 0); // Desliga o som após a duração
+// Função de callback para desligar o alarme após X segundos
+int64_t turn_off_buzzer_alarm_callback(alarm_id_t id, void *user_data) {
+    if (user_data != NULL) {
+        buzzer_data_t *data = (buzzer_data_t *)user_data;
+
+        if (data->buzzer_id == 1) {
+            pwm_set_gpio_level(BUZZER_A_PIN, 0);
+            add_alarm_in_ms(ALARM_DELAY, buzzer_reset_state_alarm_callback, &buzzer_a_data, false);
+        } else if (data->buzzer_id == 2) {
+            pwm_set_gpio_level(BUZZER_B_PIN, 0);
+            add_alarm_in_ms(ALARM_DELAY, buzzer_reset_state_alarm_callback, &buzzer_b_data, false);
+        }
+    }
+
+    return 0;
 }
 
-int64_t buzzer_b_alarm_callback(alarm_id_t id, void *user_data) {
-    buzzer_b_playing = false;
-    pwm_set_gpio_level(BUZZER_B_PIN, 0); // Desliga o som após a duração
+// Função de callback para reiniciar o estado do alarme para false após X minutos
+int64_t buzzer_reset_state_alarm_callback(alarm_id_t id, void *user_data) {
+    if (user_data != NULL) {
+        buzzer_data_t *data = (buzzer_data_t *)user_data;
+
+        if (data->buzzer_id == 1) {
+            buzzer_a_playing = false;
+        } else if (data->buzzer_id == 2) {
+            buzzer_b_playing = false;
+        }
+    }
+
+    return 0;
 }
